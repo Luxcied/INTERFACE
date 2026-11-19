@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HAND//SYNC — Gesture Authentication</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Chakra+Petch:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --white:#F3F3F3; --pink:#FF2E9A; --violet:#5D00FF; --lime:#CFFF04; --black:#1C1C1C;
+  --mono:'Space Mono',ui-monospace,Consolas,monospace;
+  --head:'Chakra Petch','Space Mono',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#111;color:var(--white);font-family:var(--mono)}
+body{
+  background:
+    linear-gradient(rgba(243,243,243,.035) 1px,transparent 1px) 0 0/32px 32px,
+    linear-gradient(90deg,rgba(243,243,243,.035) 1px,transparent 1px) 0 0/32px 32px,
+    #111;
+}
+.tiny{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(243,243,243,.55)}
+.hl{color:var(--lime)} .pk{color:var(--pink)} .vi{color:var(--violet)}
+
+/* ================= CAMERA (full-screen, primary media) ================= */
+#cam{position:fixed;inset:0;z-index:0;background:#000;overflow:hidden;display:none}
+#cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%}
+#cam video{object-fit:cover;transform:scaleX(-1);filter:grayscale(1) contrast(1.15) brightness(.6)}
+/* vignette keeps the centre clear and darkens the edges where the UI lives + violet/pink tint */
+#cam::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse at center,rgba(28,28,28,0) 38%,rgba(28,28,28,.62) 100%),
+    linear-gradient(135deg,rgba(93,0,255,.30),rgba(255,46,154,.10));}
+#scan{position:absolute;left:0;right:0;height:2px;background:var(--lime);box-shadow:0 0 12px var(--lime);animation:scan 3.6s linear infinite;opacity:.4;z-index:3}
+@keyframes scan{0%{top:0}100%{top:100%}}
+
+/* ================= STAGE: fills viewport, scaled for proportion ================= */
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;z-index:5;pointer-events:none}
+#stage::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:50;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 3px)}
+
+#hud{position:absolute;inset:0;padding:16px;display:grid;
+  grid-template-columns:272px minmax(0,1fr) 272px;
+  grid-template-rows:auto minmax(0,1fr) auto;gap:14px}
+
+.pn{background:rgba(28,28,28,.80);backdrop-filter:blur(6px);border:2px solid var(--white);
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)}
+
+/* header */
+#hdr{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;height:54px}
+#hdr .brand{font-family:var(--head);font-weight:700;font-size:21px;letter-spacing:.12em;line-height:1}
+#hdr .brand b{background:var(--pink);color:var(--black);padding:0 6px;margin-right:6px}
+#hdr .meta{display:flex;gap:22px;text-align:right}
+.led{display:inline-block;width:8px;height:8px;background:var(--pink);margin-right:5px;vertical-align:middle}
+.led.on{background:var(--lime);box-shadow:0 0 8px var(--lime)}
+
+/* left: gesture guide */
+#guide{display:flex;flex-direction:column;gap:12px;min-height:0}
+.card{flex:1;max-height:176px;min-height:0;position:relative;border:2px solid rgba(243,243,243,.35);background:rgba(28,28,28,.80);backdrop-filter:blur(6px);
+  padding:10px 12px;display:grid;grid-template-columns:62px 1fr;gap:10px;overflow:hidden;align-items:center;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)}
+.card .idx{font-family:var(--head);font-size:10px;letter-spacing:.2em;color:rgba(243,243,243,.5)}
+.card .ico{font-size:38px;line-height:1;height:62px;display:flex;align-items:center;justify-content:center;background:rgba(93,0,255,.22);border:1px solid rgba(243,243,243,.25)}
+.card .nm{font-family:var(--head);font-weight:700;font-size:17px;letter-spacing:.07em}
+.card .ds{font-size:8.5px;color:rgba(243,243,243,.62);line-height:1.5;margin-top:2px}
+.pips{display:flex;gap:4px;margin-top:6px}
+.pips i,.lp i{display:block;width:16px;height:14px;background:rgba(243,243,243,.15);clip-path:polygon(0 25%,50% 0,100% 25%,100% 100%,0 100%)}
+.pips i.up,.lp i.up{background:var(--white)}
+.pips i.dn,.lp i.dn{height:7px;margin-top:7px}
+.holdbar{position:absolute;left:0;bottom:0;height:5px;width:0;background:var(--pink)}
+.card.active{border-color:var(--pink);background:rgba(58,12,42,.88)}
+.card.active .idx{color:var(--pink)}
+.card.done{border-color:var(--lime);background:rgba(38,48,6,.88)}
+.card.done .idx::after{content:"  ■ VERIFIED";color:var(--lime)}
+.card.done .holdbar{width:100%!important;background:var(--lime)}
+
+/* centre: viewfinder over the camera — kept clear */
+#vf{position:relative;min-height:0}
+.corner{position:absolute;width:30px;height:30px;border:3px solid var(--lime)}
+.c1{left:0;top:0;border-right:0;border-bottom:0}.c2{right:0;top:0;border-left:0;border-bottom:0}
+.c3{left:0;bottom:0;border-right:0;border-top:0}.c4{right:0;bottom:0;border-left:0;border-top:0}
+#vfTop,#vfBot{position:absolute;left:40px;right:40px;display:flex;justify-content:space-between;align-items:center}
+#vfTop{top:2px} #vfBot{bottom:2px}
+#vfTop span,#vfBot span{background:rgba(28,28,28,.82);padding:2px 7px}
+#noHand{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-family:var(--head);font-size:15px;letter-spacing:.3em;color:var(--pink);background:rgba(28,28,28,.88);padding:8px 16px;border:2px solid var(--pink);white-space:nowrap;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.35}}
+
+/* right: system panels */
+#side{display:flex;flex-direction:column;gap:12px;min-height:0}
+#side .pn{padding:10px 14px}
+#obj .big{font-family:var(--head);font-weight:700;font-size:16px;line-height:1.2;letter-spacing:.06em;margin:4px 0 6px}
+#obj .big em{font-style:normal;color:var(--lime)}
+#obj p{font-size:8.5px;line-height:1.7;color:rgba(243,243,243,.65);letter-spacing:.05em}
+#liveBox .row{display:flex;gap:10px;margin:8px 0 6px}
+.lp{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:8px;color:rgba(243,243,243,.6);letter-spacing:.1em}
+.lp i{width:20px;height:22px}
+.lp i.dn{height:10px;margin-top:12px}
+#liveName{font-family:var(--head);font-weight:700;font-size:14px;letter-spacing:.1em;color:var(--pink)}
+#logBox{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+#log{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;margin-top:6px;border-left:2px solid var(--violet);padding-left:10px;font-size:9px;line-height:1.6;color:rgba(243,243,243,.75)}
+#log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#log div:last-child{color:var(--lime)}
+
+/* bottom: instruction + progress */
+#bot{grid-column:1/-1;padding:10px 18px 12px;text-align:center}
+#instr .lab{color:var(--pink)}
+#instr .big{font-family:var(--head);font-weight:700;font-size:28px;line-height:1.1;margin:4px 0 4px;letter-spacing:.05em}
+#instr .big em{font-style:normal;background:var(--lime);color:var(--black);padding:0 8px}
+#instr p{font-size:10px;line-height:1.5;color:rgba(243,243,243,.7)}
+#prog{margin-top:8px;text-align:left}
+#prog .row{display:flex;justify-content:space-between;margin-bottom:4px}
+#bar{position:relative;height:16px;border:2px solid var(--white);background:var(--black)}
+#fill{height:100%;width:0;background:repeating-linear-gradient(90deg,var(--violet) 0 6px,var(--pink) 6px 12px);transition:width .12s linear}
+#bar .tick{position:absolute;top:0;bottom:0;width:2px;background:var(--white)}
+
+/* ================= BOOT ================= */
+.layer{position:absolute;inset:0;z-index:20;display:none}
+.layer.show{display:block}
+#boot{background:var(--black);z-index:30;pointer-events:auto}
+#boot .grid{position:absolute;inset:0;background:
+  linear-gradient(rgba(93,0,255,.25) 1px,transparent 1px) 0 0/48px 48px,
+  linear-gradient(90deg,rgba(93,0,255,.25) 1px,transparent 1px) 0 0/48px 48px;opacity:.5}
+#boot .wrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(880px,calc(100% - 96px))}
+#bootTitle{font-family:var(--head);font-weight:700;font-size:62px;line-height:.95;letter-spacing:.04em;margin:14px 0 20px}
+#bootTitle span{color:var(--pink)}
+#bootTxt{font-size:13px;line-height:1.9;min-height:170px;color:var(--white)}
+#bootTxt .cur::after{content:"█";color:var(--lime);animation:blink 1s steps(2) infinite}
+.btn{font-family:var(--head);font-weight:700;font-size:20px;letter-spacing:.2em;color:var(--black);background:var(--lime);border:0;padding:16px 34px;cursor:pointer;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));}
+.btn:hover{background:var(--pink);color:var(--white)}
+.btn:disabled{opacity:.4;cursor:wait}
+.btn.ghost{background:transparent;color:var(--white);outline:2px solid var(--white);outline-offset:-2px;font-size:12px;padding:10px 18px}
+.btn.ghost:hover{background:var(--white);color:var(--black)}
+#bootBtns{display:flex;gap:16px;align-items:center;margin-top:16px;flex-wrap:wrap}
+
+/* ================= FULL-SCREEN VIDEO (no UI) ================= */
+#flash{position:fixed;background:var(--lime);z-index:200;opacity:0;pointer-events:none;display:block}
+#vid{position:fixed;inset:0;z-index:100;background:#000}
+#vid video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;border:0}
+body.playing #fs{display:none}
+body.playing{cursor:none}
+
+/* fullscreen button — viewport bottom-left */
+#fs{position:fixed;left:14px;bottom:14px;width:40px;height:40px;z-index:999;background:var(--black);border:2px solid var(--lime);cursor:pointer;display:grid;place-items:center;
+  clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,0 100%);}
+#fs:hover{background:var(--lime)} #fs:hover path{stroke:var(--black)}
+#fs svg{width:20px;height:20px}
+</style>
+</head>
+<body>
+
+<!-- FULL-SCREEN CAMERA LAYER -->
+<div id="cam">
+  <video id="video" playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div id="scan"></div>
+</div>
+
+<div id="stage">
+  <div id="hud">
+
+    <!-- TOP -->
+    <div id="hdr" class="pn">
+      <div>
+        <div class="brand"><b>HAND//SYNC</b>GESTURE AUTH</div>
+        <div class="tiny" style="margin-top:5px">PROTOCOL 7.3 · OPTICAL BIOMETRIC INTERFACE · BUILD 2026.11</div>
+      </div>
+      <div class="meta">
+        <div class="tiny">CAM<br><span class="hl" id="hCam"><i class="led"></i>OFFLINE</span></div>
+        <div class="tiny">TRACK<br><span id="hTrk"><i class="led"></i>STANDBY</span></div>
+        <div class="tiny">FPS<br><span class="hl" id="hFps">00</span></div>
+        <div class="tiny">T+<br><span class="hl" id="hClock">00:00:00</span></div>
+      </div>
+    </div>
+
+    <!-- LEFT: gesture guide -->
+    <div id="guide"></div>
+
+    <!-- CENTRE: clear viewfinder over the camera -->
+    <div id="vf">
+      <i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i>
+      <div id="vfTop"><span class="tiny hl">OPTICAL FEED // 01 · CENTER LOCK</span><span class="tiny" id="tagRes">---×---</span></div>
+      <div id="noHand">NO HAND DETECTED</div>
+      <div id="vfBot">
+        <span class="tiny" id="tagLm">LM: 00/21</span>
+        <span class="tiny pk" id="tagLive">LIVE: —</span>
+        <span class="tiny" id="tagXY">X:0.000 Y:0.000</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: system panels -->
+    <div id="side">
+      <div id="obj" class="pn">
+        <div class="tiny lab pk">▌ SYS//OBJECTIVE</div>
+        <div class="big">DETECT <em>HUMAN</em><br>INTERACTION</div>
+        <p>MODE ........ OPTICAL BIOMETRIC<br>TRACKING .... 21-PT SKELETAL<br>AUTH ......... 3-GESTURE SEQUENCE</p>
+      </div>
+      <div id="liveBox" class="pn">
+        <div class="tiny">▌ LIVE FINGER STATE</div>
+        <div class="row">
+          <div class="lp"><i id="lp0"></i>THB</div><div class="lp"><i id="lp1"></i>IDX</div><div class="lp"><i id="lp2"></i>MID</div>
+          <div class="lp"><i id="lp3"></i>RNG</div><div class="lp"><i id="lp4"></i>PNK</div>
+        </div>
+        <div id="liveName">—</div>
+      </div>
+      <div id="logBox" class="pn">
+        <div class="tiny">▌ SYSTEM LOG</div>
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <!-- BOTTOM: instruction + progress -->
+    <div id="bot" class="pn">
+      <div id="instr">
+        <div class="tiny lab" id="iLab">▌ DIRECTIVE 01 / 03</div>
+        <div class="big" id="iBig">AWAITING INITIALIZATION</div>
+        <p id="iSub">Imitate each gesture shown on the left panel exactly as displayed. Hold it steady until the sequence locks.</p>
+      </div>
+      <div id="prog">
+        <div class="row tiny"><span id="pLab">SEQUENCE SYNC · 0/3</span><span id="pPct" class="hl">000%</span></div>
+        <div id="bar"><div id="fill"></div>
+          <i class="tick" style="left:25%"></i><i class="tick" style="left:50%"></i><i class="tick" style="left:75%"></i>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOOT -->
+  <div id="boot" class="layer show">
+    <div class="grid"></div>
+    <div class="tiny" style="position:absolute;left:48px;top:40px">// SYSTEM BOOT · SECTOR 00 · HUMAN INTERACTION DETECTION UNIT</div>
+    <div class="tiny" style="position:absolute;right:48px;top:40px"><span class="pk">■</span> RESTRICTED ACCESS</div>
+    <div class="wrap">
+      <div class="tiny hl">▌ OBJECTIVE</div>
+      <div id="bootTitle">DETECT <span>HUMAN</span><br>INTERACTION.</div>
+      <div id="bootTxt"></div>
+      <div id="bootBtns">
+        <button class="btn" id="startBtn" disabled>INITIALIZE SYSTEM</button>
+        <label class="btn ghost" for="file">REPLACE MP4 SOURCE</label>
+        <input type="file" id="file" accept="video/mp4,video/*" hidden>
+        <span class="tiny" id="srcTag">SRC: video.mp4</span>
+      </div>
+    </div>
+    <div class="tiny" style="position:absolute;left:48px;bottom:36px">CAMERA ACCESS REQUIRED · ALL PROCESSING OCCURS LOCALLY ON THIS DEVICE</div>
+  </div>
+</div>
+
+<!-- FULL-SCREEN VIDEO (no UI) -->
+<div id="flash" class="layer"></div>
+<div id="vid" class="layer">
+  <video id="player" playsinline></video>
+</div>
+
+<!-- Fullscreen button (viewport bottom-left) -->
+<button id="fs" title="Fullscreen" aria-label="Toggle fullscreen">
+  <svg viewBox="0 0 24 24" fill="none"><path id="fsPath" d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" stroke="#CFFF04" stroke-width="2.5" stroke-linecap="square"/></svg>
+</button>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+/* ================= CONFIG ================= */
+const VIDEO_SRC = 'video.mp4';   // place your mp4 next to this file, or use "REPLACE MP4 SOURCE"
+const HOLD_MS   = 800;           // how long each gesture must be held
+const LOAD_MS   = 3200;          // fake decode time before video
+
+const GESTURES = [
+  {id:'open',  icon:'✋', name:'OPEN PALM',  desc:'All four fingers extended,<br>palm facing the camera.', pips:[1,1,1,1,1], cmd:'OPEN PALM'},
+  {id:'peace', icon:'✌️', name:'VICTORY',    desc:'Index + middle extended,<br>ring + pinky folded.',      pips:[0,1,1,0,0], cmd:'VICTORY SIGN'},
+  {id:'fist',  icon:'✊', name:'CLOSED FIST',desc:'All fingers curled<br>into the palm.',                  pips:[0,0,0,0,0], cmd:'CLOSED FIST'}
+];
+const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const TIPS = [4,8,12,16,20];
+const TIPNAME = {4:'THB',8:'IDX',12:'MID',16:'RNG',20:'PNK'};
+
+/* ================= DOM ================= */
+const $ = id => document.getElementById(id);
+const stage=$('stage'), video=$('video'), canvas=$('overlay'), ctx=canvas.getContext('2d');
+const player=$('player');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let videoURL = VIDEO_SRC;
+
+/* ---------- stage fills the viewport; UI scale keeps proportions ---------- */
+function fit(){
+  const s = Math.max(0.5, Math.min(innerWidth/1024, innerHeight/768));
+  stage.style.width  = (innerWidth/s)+'px';
+  stage.style.height = (innerHeight/s)+'px';
+  stage.style.transform = `scale(${s})`;
+}
+addEventListener('resize',fit); fit();
+
+/* ---------- full-viewport tracking canvas ---------- */
+const K=0.7; // drawing scale: 1 logical unit = K css px
+function sizeCanvas(){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  canvas.width=Math.round(innerWidth*dpr); canvas.height=Math.round(innerHeight*dpr);
+  ctx.setTransform(dpr*K,0,0,dpr*K,0,0);
+}
+addEventListener('resize',sizeCanvas); sizeCanvas();
+
+/* ---------- fullscreen button ---------- */
+$('fs').addEventListener('click',()=>{
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(()=>{});
+  else document.exitFullscreen?.();
+});
+document.addEventListener('fullscreenchange',()=>{
+  $('fsPath').setAttribute('d', document.fullscreenElement
+    ? 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6'
+    : 'M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6');
+  setTimeout(()=>{fit();sizeCanvas();},60);
+});
+
+/* ---------- build guide cards ---------- */
+const guide=$('guide');
+GESTURES.forEach((g,i)=>{
+  const c=document.createElement('div'); c.className='card'; c.id='card'+i;
+  c.innerHTML=`<div class="ico">${g.icon}</div>
+    <div><div class="idx">GESTURE 0${i+1}</div><div class="nm">${g.name}</div>
+    <div class="ds">${g.desc}</div>
+    <div class="pips">${g.pips.map(p=>`<i class="${p?'up':'dn'}"></i>`).join('')}</div></div>
+    <div class="holdbar" id="hold${i}"></div>`;
+  guide.appendChild(c);
+});
+
+/* ---------- log ---------- */
+const logEl=$('log'); const logLines=[];
+function log(t){
+  logLines.push(`> ${t}`); if(logLines.length>14) logLines.shift();
+  logEl.innerHTML = logLines.map(l=>`<div>${l}</div>`).join('');
+}
+
+/* ---------- clock ---------- */
+const t0=performance.now();
+setInterval(()=>{
+  const s=Math.floor((performance.now()-t0)/1000);
+  $('hClock').textContent=[s/3600|0,(s/60|0)%60,s%60].map(n=>String(n).padStart(2,'0')).join(':');
+},500);
+
+/* ---------- boot typewriter ---------- */
+const BOOT = [
+  '> SYSTEM ID ........ HAND//SYNC-7.3',
+  '> MISSION .......... DETECT HUMAN INTERACTION THROUGH HAND GESTURES',
+  '> METHOD ........... 21-POINT SKELETAL LANDMARK TRACKING',
+  '> AUTH PROTOCOL .... REPLICATE 3 GESTURES IN SEQUENCE',
+  '> ON SUCCESS ....... MEDIA STREAM UNLOCKED',
+  '> AWAITING OPERATOR INPUT_'
+];
+(async function typeBoot(){
+  const el=$('bootTxt'); let out='';
+  try{
+    for(const line of BOOT){
+      for(const ch of line){ out+=ch; el.innerHTML=out.replace(/\n/g,'<br>')+'<span class="cur"></span>'; await sleep(12); }
+      out+='\n'; await sleep(160);
+    }
+    el.innerHTML=out.replace(/\n/g,'<br>').replace(/_?<br>$/,'')+'<span class="cur"></span>';
+  }finally{
+    $('startBtn').disabled=false;
+  }
+})();
+
+/* ---------- custom mp4 ---------- */
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  videoURL=URL.createObjectURL(f); $('srcTag').textContent='SRC: '+f.name.toUpperCase().slice(0,28);
+});
+
+/* ================= STATE ================= */
+let phase='boot', step=0, holdStart=0, lastMatch=0, hands=null, running=false;
+let frames=0, lastFpsT=performance.now();
+
+function setProgress(p,label){
+  p=Math.max(0,Math.min(100,p));
+  $('fill').style.width=p+'%';
+  $('pPct').textContent=String(Math.round(p)).padStart(3,'0')+'%';
+  if(label) $('pLab').textContent=label;
+}
+function refreshCards(){
+  GESTURES.forEach((g,i)=>{
+    const c=$('card'+i);
+    c.classList.toggle('done', i<step);
+    c.classList.toggle('active', i===step && phase==='track');
+    if(i!==step) $('hold'+i).style.width = i<step?'100%':'0';
+  });
+  if(phase==='track' && step<3){
+    $('iLab').textContent=`▌ DIRECTIVE 0${step+1} / 03`;
+    $('iBig').innerHTML=`IMITATE: <em>${GESTURES[step].cmd}</em>`;
+    $('iSub').textContent='Mirror the exact gesture shown in the highlighted card. Hold it steady until the bar locks.';
+  }
+}
+function setLive(st,name){
+  for(let i=0;i<5;i++) $('lp'+i).className = st? (st[i]?'up':'dn') : '';
+  $('liveName').textContent = name||'—';
+}
+
+/* ================= START ================= */
+$('startBtn').addEventListener('click', async ()=>{
+  $('startBtn').disabled=true; $('startBtn').textContent='LINKING OPTICS…';
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=stream; await video.play();
+    $('cam').style.display='block';
+    $('hCam').innerHTML='<i class="led on"></i>ONLINE';
+    $('tagRes').textContent=`${video.videoWidth}×${video.videoHeight}`;
+    log('OPTICAL FEED ESTABLISHED');
+  }catch(err){
+    $('startBtn').textContent='CAMERA DENIED — RETRY'; $('startBtn').disabled=false;
+    log('ERROR: CAMERA ACCESS REFUSED'); return;
+  }
+  $('boot').classList.remove('show');
+  phase='track'; log('LOADING NEURAL LANDMARK MODEL…'); setProgress(0,'MODEL LOAD');
+  try{
+    const vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const make=delegate=>HandLandmarker.createFromOptions(vision,{
+      baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",delegate},
+      runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.6,minTrackingConfidence:.6
+    });
+    try{ hands=await make("GPU"); }catch(e){ hands=await make("CPU"); }
+  }catch(e){ log('ERROR: MODEL FAILED TO LOAD (CHECK NETWORK)'); $('iBig').textContent='MODEL LOAD FAILURE'; return; }
+  $('hTrk').innerHTML='<i class="led on"></i>ACTIVE';
+  log('MODEL READY · TRACKING ARMED'); log('SHOW YOUR HAND TO THE CAMERA');
+  step=0; setProgress(0,'SEQUENCE SYNC · 0/3'); refreshCards();
+  running=true; loop();
+});
+let lastVT=-1;
+function loop(){
+  if(!running) return;
+  if(video.readyState>=2 && video.currentTime!==lastVT){
+    lastVT=video.currentTime;
+    try{ const r=hands.detectForVideo(video,performance.now()); onResults({multiHandLandmarks:r.landmarks}); }catch(e){}
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ================= GESTURE LOGIC ================= */
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0));
+function fingerState(lm){
+  const w=lm[0];
+  const ext=(tip,pip)=>d(w,lm[tip])>d(w,lm[pip])*1.08;
+  const thumb=d(lm[4],lm[17])>d(lm[3],lm[17])*1.08 && d(lm[4],lm[5])>d(lm[3],lm[5])*0.95;
+  return [thumb,ext(8,6),ext(12,10),ext(16,14),ext(20,18)];
+}
+function classify(s){
+  const [,i,m,r,p]=s;
+  if(i&&m&&r&&p) return 'open';
+  if(i&&m&&!r&&!p) return 'peace';
+  if(!i&&!m&&!r&&!p) return 'fist';
+  return null;
+}
+
+/* ================= RESULTS / DRAW ================= */
+function mapPt(lm,W,H){
+  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const sc=Math.max(W/vw,H/vh), ox=(W-vw*sc)/2, oy=(H-vh*sc)/2;
+  return {x:W-(lm.x*vw*sc+ox), y:lm.y*vh*sc+oy};
+}
+function onResults(res){
+  const W=innerWidth/K, H=innerHeight/K;
+  ctx.clearRect(0,0,W,H);
+  frames++; const now=performance.now();
+  if(now-lastFpsT>1000){ $('hFps').textContent=String(frames).padStart(2,'0'); frames=0; lastFpsT=now; }
+
+  const lm=res.multiHandLandmarks&&res.multiHandLandmarks[0];
+  $('noHand').style.display=lm?'none':'block';
+  drawReticle(W,H);
+  if(!lm){
+    $('tagLm').textContent='LM: 00/21'; $('tagLive').textContent='LIVE: —'; $('tagXY').textContent='X:0.000 Y:0.000';
+    setLive(null,'—');
+    holdStart=0; if(phase==='track') $('hold'+Math.min(step,2)).style.width='0';
+    if(phase==='track') setProgress(step*25);
+    return;
+  }
+  const P=lm.map(l=>mapPt(l,W,H));
+  drawHand(P,lm);
+
+  const st=fingerState(lm), g=classify(st);
+  const gname=g?GESTURES.find(x=>x.id===g).name:'UNRECOGNIZED';
+  $('tagLm').textContent='LM: 21/21';
+  $('tagLive').textContent='LIVE: '+gname;
+  $('tagXY').textContent=`X:${lm[9].x.toFixed(3)} Y:${lm[9].y.toFixed(3)}`;
+  setLive(st,gname);
+
+  if(phase!=='track'||step>=3) return;
+  const target=GESTURES[step];
+  if(g===target.id){
+    lastMatch=now; if(!holdStart) holdStart=now;
+  }else if(now-lastMatch>180){ holdStart=0; }
+  const frac=holdStart?Math.min(1,(now-holdStart)/HOLD_MS):0;
+  $('hold'+step).style.width=(frac*100)+'%';
+  setProgress((step+frac)*25,`SEQUENCE SYNC · ${step}/3`);
+  if(frac>=1){
+    log(`GESTURE 0${step+1} VERIFIED :: ${target.name}`);
+    step++; holdStart=0; lastMatch=0;
+    if(step>=3){ refreshCards(); startLoading(); }
+    else refreshCards();
+  }
+}
+function drawReticle(W,H){
+  ctx.strokeStyle='rgba(243,243,243,.28)'; ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(W/2-34,H/2);ctx.lineTo(W/2-10,H/2);ctx.moveTo(W/2+10,H/2);ctx.lineTo(W/2+34,H/2);
+  ctx.moveTo(W/2,H/2-34);ctx.lineTo(W/2,H/2-10);ctx.moveTo(W/2,H/2+10);ctx.lineTo(W/2,H/2+34);
+  ctx.stroke();
+}
+function drawHand(P,lm){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; P.forEach(p=>{x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x);y1=Math.max(y1,p.y)});
+  const m=24; x0-=m;y0-=m;x1+=m;y1+=m; const L=28;
+  ctx.strokeStyle='#CFFF04'; ctx.lineWidth=4;
+  [[x0,y0,1,1],[x1,y0,-1,1],[x0,y1,1,-1],[x1,y1,-1,-1]].forEach(([x,y,sx,sy])=>{
+    ctx.beginPath(); ctx.moveTo(x,y+sy*L); ctx.lineTo(x,y); ctx.lineTo(x+sx*L,y); ctx.stroke();
+  });
+  ctx.fillStyle='#CFFF04'; ctx.font='bold 18px Space Mono, monospace';
+  ctx.fillText('HAND_01 // TRACKING',x0,y0-10);
+  ctx.fillStyle='rgba(243,243,243,.7)'; ctx.font='16px Space Mono, monospace';
+  ctx.fillText(`${Math.round(x1-x0)}×${Math.round(y1-y0)}`,x1-70,y1+22);
+
+  ctx.lineCap='square';
+  ctx.strokeStyle='rgba(93,0,255,.9)'; ctx.lineWidth=12;
+  CONN.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(P[a].x,P[a].y);ctx.lineTo(P[b].x,P[b].y);ctx.stroke();});
+  ctx.strokeStyle='#F3F3F3'; ctx.lineWidth=3;
+  CONN.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(P[a].x,P[a].y);ctx.lineTo(P[b].x,P[b].y);ctx.stroke();});
+  ctx.fillStyle='rgba(255,46,154,.16)'; ctx.beginPath();
+  [0,1,5,9,13,17].forEach((i,k)=>k?ctx.lineTo(P[i].x,P[i].y):ctx.moveTo(P[i].x,P[i].y)); ctx.closePath(); ctx.fill();
+  P.forEach((p,i)=>{
+    const tip=TIPS.includes(i);
+    if(tip){
+      ctx.fillStyle='#FF2E9A'; ctx.fillRect(p.x-11,p.y-11,22,22);
+      ctx.strokeStyle='#F3F3F3'; ctx.lineWidth=3; ctx.strokeRect(p.x-17,p.y-17,34,34);
+      ctx.fillStyle='#F3F3F3'; ctx.font='bold 15px Space Mono, monospace'; ctx.fillText(TIPNAME[i],p.x+22,p.y-14);
+    }else{
+      ctx.fillStyle='#CFFF04'; ctx.fillRect(p.x-6,p.y-6,12,12);
+      ctx.strokeStyle='#1C1C1C'; ctx.lineWidth=2; ctx.strokeRect(p.x-6,p.y-6,12,12);
+    }
+    if(i===0||i===9){ ctx.fillStyle='rgba(243,243,243,.8)'; ctx.font='13px Space Mono, monospace'; ctx.fillText(String(i).padStart(2,'0'),p.x+12,p.y+22); }
+  });
+}
+
+/* ================= LOADING → VIDEO ================= */
+function startLoading(){
+  phase='loading';
+  $('iLab').textContent='▌ SEQUENCE COMPLETE';
+  $('iBig').innerHTML='<em>DECODING</em> MEDIA STREAM';
+  $('iSub').textContent='All gestures verified. Hold position while the secure media stream is decrypted.';
+  log('SEQUENCE LOCKED · DECRYPTING MEDIA…');
+  const t=performance.now(); const msgs=[[.25,'HANDSHAKE ACCEPTED'],[.5,'UNPACKING PAYLOAD'],[.8,'BUFFERING FRAMES']]; let mi=0;
+  (function tick(){
+    const f=Math.min(1,(performance.now()-t)/LOAD_MS);
+    setProgress(75+f*25,'DECODING MEDIA STREAM');
+    if(mi<msgs.length&&f>=msgs[mi][0]){ log(msgs[mi][1]); mi++; }
+    if(f<1) requestAnimationFrame(tick); else showVideo();
+  })();
+}
+async function showVideo(){
+  phase='video'; running=false; log('ACCESS GRANTED');
+  const fl=$('flash'); fl.classList.add('show'); fl.style.transition='none'; fl.style.opacity='1';
+  await sleep(40); fl.style.transition='opacity .5s'; fl.style.opacity='0';
+  document.body.classList.add('playing');
+  $('vid').classList.add('show');
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(()=>{});
+  player.src=videoURL; player.muted=false;
+  try{ await player.play(); }
+  catch(e){
+    try{ player.muted=true; await player.play(); $('vid').addEventListener('click',()=>{ player.muted=false; },{once:true}); }
+    catch(e2){ log('PLAYBACK BLOCKED'); resetSystem(); }
+  }
+  setTimeout(()=>fl.classList.remove('show'),600);
+}
+player.addEventListener('error',()=>{ if(phase==='video'){ log('VIDEO NOT FOUND: '+VIDEO_SRC); resetSystem(); } });
+
+/* ================= RESET (video has no UI: ends, double-click, or Esc/R) ================= */
+function resetSystem(){
+  player.pause(); $('vid').classList.remove('show'); document.body.classList.remove('playing');
+  step=0; holdStart=0; lastMatch=0; phase='track';
+  GESTURES.forEach((_,i)=>$('hold'+i).style.width='0');
+  setProgress(0,'SEQUENCE SYNC · 0/3'); refreshCards(); log('SYSTEM RESET · SEQUENCE REARMED');
+  if(!running){ running=true; loop(); }
+}
+player.addEventListener('ended',resetSystem);
+$('vid').addEventListener('dblclick',resetSystem);
+addEventListener('keydown',e=>{ if(phase==='video'&&(e.key==='Escape'||e.key==='r'||e.key==='R')) resetSystem(); });
+
+log('SYSTEM IDLE · AWAITING INITIALIZATION');
+</script>
+</body>
+</html>
